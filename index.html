@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Teachable Machine + Arduino (Servo Control)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    video {
+      border: 2px solid black;
+      margin-bottom: 10px;
+    }
+    button {
+      font-size: 18px;
+      padding: 10px 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Servo Claw Control</h1>
+  <video id="webcam" width="224" height="224" autoplay playsinline></video>
+  <p>Prediction: <span id="prediction">Waiting...</span></p>
+  <button onclick="connectSerial()">🔌 Connect to Arduino</button>
+
+  <script>
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/_vRbqBk4-/";
+    let model, webcam, writer;
+    let lastSent = ""; // prevent resending the same command too often
+
+    async function init() {
+      try {
+        model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
+        webcam = new tmImage.Webcam(224, 224, true);
+        await webcam.setup();
+        await webcam.play();
+        document.getElementById("webcam").srcObject = webcam.webcam;
+        window.requestAnimationFrame(loop);
+      } catch (err) {
+        console.error("Init error:", err);
+        document.getElementById("prediction").innerText = "Error loading model or webcam.";
+      }
+    }
+
+    async function loop() {
+      webcam.update();
+      const predictions = await model.predict(webcam.canvas);
+      predictions.sort((a, b) => b.probability - a.probability);
+      const topClass = predictions[0].className;
+      document.getElementById("prediction").innerText = topClass;
+      sendToSerial(topClass);
+      window.requestAnimationFrame(loop);
+    }
+
+    async function connectSerial() {
+      try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        writer = port.writable.getWriter();
+        alert("✅ Arduino Connected!");
+      } catch (err) {
+        alert("❌ Could not connect: " + err.message);
+      }
+    }
+
+    async function sendToSerial(prediction) {
+      if (!writer || prediction === lastSent) return;
+
+      let command = "";
+      if (prediction === "open") {
+        command = "0\n";
+      } else if (prediction === "close") {
+        command = "1\n";
+      } else {
+        return; // do nothing for "nothing"
+      }
+
+      lastSent = prediction;
+      const data = new TextEncoder().encode(command);
+      await writer.write(data);
+    }
+
+    init();
+  </script>
+</body>
+</html>
