@@ -2,59 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Teachable Machine + Arduino (Servo Control)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teachable Machine Webcam + Arduino</title>
   <style>
-    body {
-      font-family: sans-serif;
-      text-align: center;
-      padding: 20px;
+    #webcam {
+      width: 224px;
+      height: 224px;
     }
-    video {
-      border: 2px solid black;
-      margin-bottom: 10px;
-    }
-    button {
-      font-size: 18px;
-      padding: 10px 20px;
+    #prediction {
+      font-size: 24px;
+      margin-top: 20px;
     }
   </style>
 </head>
 <body>
-  <h1>Servo Claw Control</h1>
-  <video id="webcam" width="224" height="224" autoplay playsinline></video>
-  <p>Prediction: <span id="prediction">Waiting...</span></p>
-  <button onclick="connectSerial()">🔌 Connect to Arduino</button>
+  <h1>Teachable Machine Webcam + Arduino</h1>
+  <button onclick="connectSerial()">Connect to Arduino</button>
+  <br><br>
+  <video id="webcam" autoplay></video>
+  <div id="prediction">Prediction: Waiting...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
 
   <script>
-    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/_vRbqBk4-/";
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/_vRbqBk4-/"; // Your Teachable Machine model URL
     let model, webcam, writer;
-    let lastSent = ""; // prevent resending the same command too often
+    let lastSent = null;
+    let currentCamera = null;
 
+    // Function to initialize the model and webcam
     async function init() {
       try {
+        console.log("Loading model...");
         model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
+        console.log("✅ Model loaded successfully");
+
+        // Get available video devices (cameras)
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        
+        if (videoDevices.length === 0) {
+          alert("No cameras found!");
+          return;
+        }
+
+        // If there is more than one camera, prompt the user to select one
+        if (videoDevices.length > 1) {
+          const cameraList = videoDevices.map((device, index) => `${index + 1}: ${device.label}`);
+          const selectedIndex = prompt(`Choose a camera:\n${cameraList.join('\n')}`);
+          currentCamera = videoDevices[parseInt(selectedIndex) - 1];
+        } else {
+          currentCamera = videoDevices[0]; // Select the first camera
+        }
+
+        // Set up webcam with the selected camera
         webcam = new tmImage.Webcam(224, 224, true);
-        await webcam.setup();
+        await webcam.setup({ video: { deviceId: { exact: currentCamera.deviceId } } });
         await webcam.play();
         document.getElementById("webcam").srcObject = webcam.webcam;
         window.requestAnimationFrame(loop);
       } catch (err) {
-        console.error("Init error:", err);
+        console.error("Error loading model or webcam:", err);
         document.getElementById("prediction").innerText = "Error loading model or webcam.";
       }
     }
 
+    // Function to continuously update webcam and make predictions
     async function loop() {
       webcam.update();
       const predictions = await model.predict(webcam.canvas);
       predictions.sort((a, b) => b.probability - a.probability);
       const topClass = predictions[0].className;
-      document.getElementById("prediction").innerText = topClass;
+      document.getElementById("prediction").innerText = "Prediction: " + topClass;
       sendToSerial(topClass);
       window.requestAnimationFrame(loop);
     }
 
+    // Function to connect to the Arduino via Web Serial API
     async function connectSerial() {
       try {
         const port = await navigator.serial.requestPort();
@@ -66,16 +90,17 @@
       }
     }
 
+    // Function to send data to the Arduino based on the prediction
     async function sendToSerial(prediction) {
       if (!writer || prediction === lastSent) return;
 
       let command = "";
       if (prediction === "open") {
-        command = "0\n";
+        command = "0\n"; // Command for opening
       } else if (prediction === "close") {
-        command = "1\n";
+        command = "1\n"; // Command for closing
       } else {
-        return; // do nothing for "nothing"
+        return; // Do nothing for "nothing"
       }
 
       lastSent = prediction;
@@ -83,6 +108,7 @@
       await writer.write(data);
     }
 
+    // Initialize the model and webcam when the page loads
     init();
   </script>
 </body>
